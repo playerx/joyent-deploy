@@ -1,0 +1,272 @@
+#!/bin/bash
+#
+# Deploy the given git revision as the node-service.
+#
+# Usage:
+#   node-deploy [REV]
+#
+# where "REV" is a git commit-ish, e.g. a git commit sha1: "node-deploy 020088b".
+# If not given, "REV" defaults to "master".
+#
+#
+# The basic process:
+# - checkout to a new deploy dir
+# - use npm to install deps (creating a package.json if necessary)
+# - save state on the current running deployment (which may be
+#   the default node-service)
+# - start the SMF service (using 'npm start')
+# - if it fails to come online, rollback to the previous one
+
+export PS4='${BASH_SOURCE}:${LINENO}: '
+set -e
+if [ "$DEBUG" != "" ]; then
+  set -x
+fi
+
+if [ "$4" == "1" ]; then
+  set -x
+fi
+
+#---- config, globals
+
+root_dir="$3"
+config_dir="$root_dir/config"
+
+service_name="$2"
+service_dir="$root_dir/$service_name/service"
+service_starter="$config_dir/service-starter.sh"
+
+fail_dir="$service_dir/failures"
+releases_dir="$service_dir/releases"
+current_dir="$service_dir/current"
+service_log="/var/svc/log/site-$service_name:default.log"
+date=$(date +%Y-%m-%dT%H-%M-%S.%N)
+dir="$releases_dir/$date"
+manifest="$releases_dir/$date.xml"
+repo="$root_dir/$service_name/repo"
+get_script_start="$config_dir/get-script-start"
+
+unset GIT_DIR
+unset GIT_WORK_TREE
+
+start_script=""
+
+
+
+#---- support functions
+
+function checkout() {
+  # first arg is the thing to check out and install
+  # turn it into a rev sha.
+
+  rm -rf "$dir" || true
+  git clone "$repo" "$dir" &> /dev/null
+  cd "$dir"
+  git checkout "$1" -b "deploy-$date" --quiet
+  git submodule update --init --recursive &> /dev/null || true
+}
+
+function packagejson() {
+  # If there is no package.json, then add one to
+  # explicitly name a start script.
+
+  if [ -f $dir/package.json ]; then
+    script_start="$(node $get_script_start $dir/package.json)"
+    echo "script_start: $script_start"
+    service_starter="$service_starter $script_start"
+    echo "service_starter: $service_starter"
+    return 0
+  fi
+  if ! [ -f $dir/server.js ]; then
+    echo "error: Cannot deploy without either a 'package.json' or 'server.js'."
+    echo "See <http://wiki.joyent.com/display/node/Node+Home> for more info."
+    return 1
+  fi
+
+  echo "--"
+  echo "Consider adding a 'package.json' to your repository to specify"
+  echo "server dependencies. Here is an example with detected npm installs"
+  echo "in your nodejs machine:"
+  echo ""
+  echo "$suggested" | sed 's/^/    /'
+  echo ""
+  echo "See <http://wiki.joyent.com/display/node/npm+Integration> for more info."
+  echo "--"
+
+  return 1
+}
+
+function npminstall() {
+  # Now the deploy $dir has a package.json.
+  # Symlink in any existing manually-installed deps, and then
+  # run 'npm install' to build the rest, and then build this folder.
+
+  # Note: want to use 'cat package.json | json dependencies' but need
+  # json v1.2.1 for that.
+  if [[ `grep dependencies "$dir/package.json"` ]]; then
+    echo "Installing node module deps (from package.json)".
+  fi
+  cd $dir
+  # nodeversion=$(/opt/nodejs/get-node-version $dir)
+  sudo npm install --link 2>&1 | sed 's/^/    /'
+
+  # build
+  sudo npm build $dir --npat
+
+  echo "npminstall finished! dir:$dir"
+}
+
+function smfservice() {
+  # Setup the SMF manifest, enabling and clearing (if necessary) of node-service.
+  local dir=$1
+  local manifest=$2
+  local date=$3
+  local is_rollback=$4
+
+  local original_state=$(svcs -H -o state $service_name 2>/dev/null)
+  if  [ "$original_state" != "" ] && \
+      [ "$original_state" != "disabled" ]; then
+    svcadm disable -s $service_name
+  fi
+
+  # might already exist, if this is part of a rollback.
+  if ! [ -f "$manifest" ]; then
+    # set up the smf manifest that runs `npm start` in the package dir.
+    gsed -e "s#@@DIR@@#$dir#g" \
+         -e "s#@@SERVICE_NAME@@#$service_name#g" \
+         -e "s#@@SERVICE_STARTER@@#$service_starter#g" \
+         -e "s/@@VERSION@@/$date/g" \
+         $config_dir/manifest.xml > $manifest
+  fi
+
+  svccfg import $manifest
+  svccfg -s $service_name:default refresh
+
+  # Long sleep to attempt to break out of "Restarting too quickly,
+  # changing state to maintenance." from svc.startd.
+  if [ "$original_state" == "maintenance" ]; then
+    sleep 10
+  fi
+
+  # The current dir isn't referenced in the manifest
+  # it's just for convenience.  Delete it, gently.
+  rm -rf $current_dir || true
+
+  echo "Starting $service_name."
+  svcadm enable -s $service_name 2>&1
+  # Give the server a little time, but not too much, to crash.
+  sleep 1
+
+  if [ "$(svcs -H -o state $service_name)" == "online" ]; then
+    ln -s $dir $current_dir
+
+    if [[ "$is_rollback" == "1" ]]; then
+      echo "Rollback succeeded."
+    else
+      echo "Win!"
+    fi
+
+  else
+    echo "error: Failed to start node server."
+    # Disable to attempt to ensure service log is flushed.
+    svcadm disable -s $service_name
+    echo "    * * * tail of the service log * * *"
+    local startline=$(grep -n "Executing start method " "$service_log" | tail -1 | awk -F: '{print $1}')
+    if [[ -z "$startline" ]]; then
+      tail -40 "$service_log" | sed 's/^/    /'
+    else
+      local totallines=$(wc -l "$service_log" | awk '{print $1}')
+      local n=$(( $totallines - $startline + 2 ))
+      tail -$n "$service_log" | sed 's/^/    /'
+    fi
+    echo "    * * *"
+    # Let the rollback function handle the rest.
+    return 1
+  fi
+}
+
+function rollback() {
+  # Something failed. Roll back to previous versions or to the default.
+  local original_release_dir=$1
+  local original_state=$2
+
+  # if [[ -z "$original_release_dir" ]]  \
+  #     || [[ ! -d "$original_release_dir" ]] \
+  #     || [[ "$original_release_dir" == "/opt/nodejs/default_server" ]]; then
+  #   rollback_default
+  #   return $?
+  # fi
+
+  echo
+  echo "Rolling back to $(basename $original_release_dir) release."
+
+  # Move the failed release to failures dir.
+  if [ -d "$dir" ]; then
+    mv $dir $fail_dir
+  fi
+  if [ -f "$manifest" ]; then
+    mv $manifest $fail_dir
+  fi
+
+  #TODO is 'original_release_dir' absolute?
+  dir=$original_release_dir
+  manifest=$original_release_dir.xml
+  date=$(basename $original_release_dir)
+  smfservice "$dir" "$manifest" "$date" 1 && \
+    true || \
+    echo "error: Rollback failed. Log in and poke around."
+}
+
+
+# function rollback_default() {
+#   echo
+#   echo "Rolling back to default server."
+
+#   dir=/opt/nodejs/default_server
+#   manifest=/opt/nodejs/default_server/default-server.xml
+#   date="default"
+#   smfservice "$dir" "$manifest" "$date" 1
+# }
+
+
+function superfail() {
+  cat <<-SORRY
+  Even the rollback failed.  This is really bad, and
+  it should never *ever* happen.  It is almost certainly
+  a severe bug in our code, and we are very embarrassed
+  to have been seen in this condition.  You have every
+  right to be very annoyed.  Enraged, even.
+
+  Please report this to the operator of this cloud.
+SORRY
+  return 1
+}
+
+
+
+#---- mainline
+
+function main() {
+  local original_release_dir=$(ls -l $current_dir 2>/dev/null | awk '{print $NF}')
+  local original_state=$(svcs -H -o state $service_name 2>/dev/null)
+
+  checkout $1 \
+  && packagejson \
+  && npminstall \
+  && smfservice "$dir" "$manifest" "$date" 0 \
+  || rollback "$original_release_dir" "$original_state" \
+  || superfail
+}
+
+
+REV=${1:-master}
+echo "Deploying $service_name."
+echo "    revision:  $REV"
+echo "    timestamp: $date"
+echo "    dir: $dir"
+
+if ! [ -d $releases_dir ]; then
+  mkdir -p $releases_dir
+fi
+main "$REV"
+

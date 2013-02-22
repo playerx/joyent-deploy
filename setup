@@ -1,0 +1,20 @@
+#!/usr/bin/bash
+
+
+service_name=$1
+root_dir="/home/admin"
+
+if [ "$service_name" == "" ]; then
+	echo "please pass service_name (for example: jok-portal)"
+	exit
+fi
+
+mkdir $root_dir/$service_name
+mkdir $root_dir/$service_name/repo
+mkdir $root_dir/$service_name/service
+mkdir $root_dir/$service_name/service/log
+mkdir $root_dir/$service_name/service/current
+mkdir $root_dir/$service_name/service/releases
+mkdir $root_dir/$service_name/service/failures
+
+bash $root_dir/config/setup-git.sh $service_name $root_dir

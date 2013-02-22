@@ -1,0 +1,35 @@
+#!/bin/sh
+# The "post-receive" script is run after receive-pack has accepted a pack
+# and the repository has been updated.  It is passed arguments in through
+# stdin in the form
+#  <oldrev> <newrev> <refname>
+# For example:
+#  aa453216d1b3e49e7f6f98441fa56946ddcd6a20 68f7abf4e6f922807889f52bc043ecd31b79f814 refs/heads/master
+
+echo "Test. Test. Test. waiting push"
+
+# Just run the deploy script here.
+# That's where all the magic is.
+set -e
+read oldrev newrev refname
+#echo "oldrev=$oldrev"
+#echo "newrev=$newrev"
+#echo "refname=$refname"
+
+echo "Push received!"
+
+if [ "$refname" != "refs/heads/master" ]; then
+  echo "Push a master branch to deploy,"
+  echo "or log in via ssh and run 'service-deploy <commit-ish>'."
+  exit 0
+fi
+
+root_dir="@@ROOT_DIR@@"
+config_dir="$root_dir/config"
+service_name="@@SERVICE_NAME@@"
+service_dir="$root_dir/$service_name/service"
+
+if [[ ! -d $service_dir/log ]]; then
+  mkdir -p $service_dir/log
+fi
+bash $config_dir/service-deploy "$newrev" "$service_name" "$root_dir" | tee -a $service_dir/log/deploy.log
