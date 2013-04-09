@@ -7,7 +7,7 @@ set -o pipefail     # crash on errors in pipelines
 service_name="$1"
 root_dir="$2"
 service_repo="$root_dir/$service_name/repo"
-config_dir="$root_dir/config"
+config_dir="$root_dir/joyent-deploy"
 
 
 
