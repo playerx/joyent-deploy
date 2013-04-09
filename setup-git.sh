@@ -28,3 +28,4 @@ gsed -e "s#@@SERVICE_NAME@@#$service_name#g" \
          $config_dir/post-receive > ./post-receive
 
 chmod +x ./post-receive
+sudo chown -R admin:node $service_repo
