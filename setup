@@ -17,4 +17,4 @@ mkdir $root_dir/$service_name/service/current
 mkdir $root_dir/$service_name/service/releases
 mkdir $root_dir/$service_name/service/failures
 
-bash $root_dir/config/setup-git.sh $service_name $root_dir
+bash $root_dir/joyent-deploy/setup-git.sh $service_name $root_dir
