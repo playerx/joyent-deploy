@@ -32,4 +32,4 @@ service_dir="$root_dir/$service_name/service"
 if [[ ! -d $service_dir/log ]]; then
   mkdir -p $service_dir/log
 fi
-bash $config_dir/service-deploy "$newrev" "$service_name" "$root_dir" | tee -a $service_dir/log/deploy.log
+bash $config_dir/service-deploy "$newrev" "$service_name" "$root_dir" | sudo tee -a $service_dir/log/deploy.log
