@@ -30,7 +30,7 @@ fi
 #---- config, globals
 
 root_dir="$3"
-config_dir="$root_dir/config"
+config_dir="$root_dir/joyent-deploy"
 
 service_name="$2"
 service_dir="$root_dir/$service_name/service"
