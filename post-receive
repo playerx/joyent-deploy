@@ -25,11 +25,11 @@ if [ "$refname" != "refs/heads/master" ]; then
 fi
 
 root_dir="@@ROOT_DIR@@"
-config_dir="$root_dir/joyent-deploy"
+config_dir="$root_dir/config"
 service_name="@@SERVICE_NAME@@"
 service_dir="$root_dir/$service_name/service"
 
 if [[ ! -d $service_dir/log ]]; then
   mkdir -p $service_dir/log
 fi
-bash $config_dir/service-deploy "$newrev" "$service_name" "$root_dir" | sudo tee -a $service_dir/log/deploy.log
+bash $config_dir/service-deploy "$newrev" "$service_name" "$root_dir" | tee -a $service_dir/log/deploy.log

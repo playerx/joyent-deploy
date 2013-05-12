@@ -30,7 +30,7 @@ npm () {
   || echo "failed" && return 1
 }
 
-sudo ulimit -n 10241
+ulimit -n 10241
 
 ( echo "Starting $$, Parent: $PARENT_PID"
   ENV=production PORT=80 $NODE app

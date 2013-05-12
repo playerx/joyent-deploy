@@ -16,7 +16,7 @@
     </dependency>
 
     <method_context working_directory="@@DIR@@">
-      <method_credential user="admin" group="node" privileges='basic,net_privaddr'  />
+      <method_credential user="root" group="node" privileges='basic,net_privaddr'  />
     </method_context>
 
     <exec_method

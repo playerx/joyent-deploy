@@ -7,7 +7,7 @@ set -o pipefail     # crash on errors in pipelines
 service_name="$1"
 root_dir="$2"
 service_repo="$root_dir/$service_name/repo"
-config_dir="$root_dir/joyent-deploy"
+config_dir="$root_dir/config"
 
 
 
@@ -28,4 +28,3 @@ gsed -e "s#@@SERVICE_NAME@@#$service_name#g" \
          $config_dir/post-receive > ./post-receive
 
 chmod +x ./post-receive
-sudo chown -R admin:node $service_repo
